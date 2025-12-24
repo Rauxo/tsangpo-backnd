@@ -4,10 +4,11 @@ import dotenv from "dotenv";
 dotenv.config();
 import cookieParser from "cookie-parser";
 import morgan from "morgan";
+import connectDb from "./config/dbConfig.js";
 
 
 // Connect to the database
-// connectDb();
+connectDb();
 
 const app = express();
 
