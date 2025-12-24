@@ -5,6 +5,7 @@ dotenv.config();
 import cookieParser from "cookie-parser";
 import morgan from "morgan";
 import connectDb from "./config/dbConfig.js";
+import userRoute from "./routes/user.route.js"
 
 
 // Connect to the database
@@ -19,6 +20,8 @@ app.use(cookieParser());
 app.use(morgan("dev"));
 
 const port = process.env.PORT || 8080;
+
+app.use("/api/v1/user",userRoute)
 
 app.get("/", (req, res) => {
   res.send("Hello World!");
