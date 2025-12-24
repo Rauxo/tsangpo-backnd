@@ -52,3 +52,47 @@ export async function registerController(req, res) {
     return res.status(500).json({ message: "Internal Server Error" });
   }
 }
+
+// Login
+export async function loginController(req, res) {
+  try {
+    const user = await userModel.findOne({ email: req.body.email });
+    if (!user) {
+      return res.status(200).send({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const isMatch = await bcrypt.compare(req.body.password, user.password);
+    if (!isMatch) {
+      return res.status(200).send({
+        success: false,
+        message: "Invalid Credentials",
+      });
+    }
+
+    // ✅ NO expiresIn -> token will never expire
+    const token = jwt.sign(
+      { id: user._id },
+      process.env.JWT_SECRET_KEY
+    );
+
+    user.lastLogin = new Date();
+    await user.save();
+
+    return res.status(200).send({
+      success: true,
+      message: "Login Successful",
+      token,
+      isAdmin: user.role === "ADMIN",
+    });
+
+  } catch (error) {
+    console.log(error);
+    res.status(500).send({
+      success: false,
+      message: `Login Controller Error: ${error.message}`,
+    });
+  }
+}
