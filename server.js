@@ -6,9 +6,9 @@ import cookieParser from "cookie-parser";
 import morgan from "morgan";
 import connectDb from "./config/dbConfig.js";
 import userRoute from "./routes/user.route.js"
+import galleryRoute from "./routes/gallery.route.js";
 
 
-// Connect to the database
 connectDb();
 
 const app = express();
@@ -22,6 +22,7 @@ app.use(morgan("dev"));
 const port = process.env.PORT || 8080;
 
 app.use("/api/v1/user",userRoute)
+app.use("/api/v1/gallery", galleryRoute);
 
 app.get("/", (req, res) => {
   res.send("Hello World!");

@@ -2,25 +2,36 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import userModel from "../models/user.models.js";
 
-// create account
+// Register
 export async function registerController(req, res) {
   try {
-    const { fullName, email, contactNumber , password , confirmPassword} = req.body;
+    const { fullName, email, contactNumber, password, confirmPassword } =
+      req.body;
 
-    if (!fullName || !confirmPassword || !contactNumber || !email || !password) {
+    if (
+      !fullName ||
+      !email ||
+      !contactNumber ||
+      !password ||
+      !confirmPassword
+    ) {
       return res.status(400).json({
         message: "All fields are required",
-        error: true,
         success: false,
       });
     }
 
-    let user = await userModel.findOne({ email });
+    if (password !== confirmPassword) {
+      return res.status(400).json({
+        message: "Passwords do not match",
+        success: false,
+      });
+    }
 
-    if (user) {
-      return res.json({
+    const existingUser = await userModel.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({
         message: "User already exists",
-        error: true,
         success: false,
       });
     }
@@ -28,71 +39,116 @@ export async function registerController(req, res) {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    user = new userModel({
-      fullName:fullName,
-      email: email,
-      contactNumber:contactNumber,
+    const user = await userModel.create({
+      fullName,
+      email,
+      contactNumber,
       password: hashedPassword,
+      role: "USER",
     });
-
-    await user.save();
 
     const token = jwt.sign(
-      { email: user.email, id: user._id },
-      process.env.JWT_SECRET_KEY
+      { id: user._id, email: user.email, role: user.role },
+      process.env.JWT_SECRET_KEY,
+      { expiresIn: "7d" }
     );
 
-    return res.status(200).json({
+    return res.status(201).json({
       success: true,
-      error: false,
       message: "User registered successfully",
-      token: token,
+      token,
+      user: {
+        id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        contactNumber: user.contactNumber,
+        role: user.role,
+      },
     });
   } catch (error) {
-    return res.status(500).json({ message: "Internal Server Error" });
+    console.error("Registration error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
   }
 }
 
 // Login
 export async function loginController(req, res) {
   try {
-    const user = await userModel.findOne({ email: req.body.email });
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required",
+      });
+    }
+
+    const user = await userModel.findOne({ email });
     if (!user) {
-      return res.status(200).send({
+      return res.status(401).json({
+        success: false,
+        message: "Invalid credentials",
+      });
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid credentials",
+      });
+    }
+
+    const token = jwt.sign(
+      { id: user._id, email: user.email, role: user.role },
+      process.env.JWT_SECRET_KEY,
+      { expiresIn: "7d" }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Login successful",
+      token,
+      user: {
+        id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        contactNumber: user.contactNumber,
+        role: user.role,
+      },
+    });
+  } catch (error) {
+    console.error("Login error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+}
+
+// Get current user
+export async function getCurrentUser(req, res) {
+  try {
+    const user = await userModel.findById(req.userId).select("-password");
+    if (!user) {
+      return res.status(404).json({
         success: false,
         message: "User not found",
       });
     }
 
-    const isMatch = await bcrypt.compare(req.body.password, user.password);
-    if (!isMatch) {
-      return res.status(200).send({
-        success: false,
-        message: "Invalid Credentials",
-      });
-    }
-
-    // ✅ NO expiresIn -> token will never expire
-    const token = jwt.sign(
-      { id: user._id },
-      process.env.JWT_SECRET_KEY
-    );
-
-    user.lastLogin = new Date();
-    await user.save();
-
-    return res.status(200).send({
+    return res.status(200).json({
       success: true,
-      message: "Login Successful",
-      token,
-      isAdmin: user.role === "ADMIN",
+      user,
     });
-
   } catch (error) {
-    console.log(error);
-    res.status(500).send({
+    console.error("Get user error:", error);
+    return res.status(500).json({
       success: false,
-      message: `Login Controller Error: ${error.message}`,
+      message: "Internal server error",
     });
   }
 }
