@@ -8,6 +8,9 @@ import connectDb from "./config/dbConfig.js";
 import userRoute from "./routes/user.route.js"
 import galleryRoute from "./routes/gallery.route.js";
 import storyRoute from "./routes/story.route.js";
+import priceConfigRoute from "./routes/priceConfig.route.js";
+import calendarRoute from "./routes/calendar.route.js";
+import bookingRoute from "./routes/booking.route.js";
 
 
 connectDb();
@@ -25,6 +28,9 @@ const port = process.env.PORT || 8080;
 app.use("/api/v1/user",userRoute)
 app.use("/api/v1/gallery", galleryRoute);
 app.use("/api/v1/stories", storyRoute);
+app.use("/api/v1/prices", priceConfigRoute);
+app.use("/api/v1/calendar", calendarRoute);
+app.use("/api/v1/bookings", bookingRoute);
 
 app.get("/", (req, res) => {
   res.send("Hello World!");
