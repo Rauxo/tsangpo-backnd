@@ -11,6 +11,321 @@ const transporter = nodemailer.createTransport({
     pass: process.env.EMAIL_PASS
   }
 });
+// PRICE CONFIGURATION FUNCTIONS
+export const getPriceConfig = async (req, res) => {
+  try {
+    const priceConfig = await PriceConfig.findOne().sort({ createdAt: -1 });
+    
+    if (!priceConfig) {
+      const defaultConfig = await PriceConfig.create({
+        basePrice: 8000,
+        includedGuests: 1,
+        extraGuestPrice: 300,
+        maxGuests: 150,
+        shortCruiseSlots: [
+          { label: "Midway Dining Cruise", time: "12:30 PM – 02:30 PM", price: 5000, enabled: true },
+          { label: "Sunset Serenity Cruise", time: "03:30 PM – 05:00 PM", price: 6000, enabled: true },
+          { label: "Moonlight Cruise", time: "07:00 PM – 09:00 PM", price: 7000, enabled: true }
+        ],
+        addons: {
+          decoration: { label: "Special Decoration", price: 2000, enabled: true },
+          photography: { label: "Professional Photography", price: 3000, enabled: true },
+          catering: { label: "Premium Catering", price: 5000, enabled: true }
+        },
+        formSpecificPricing: {
+          tsangpoImperialPrivate: { basePrice: 12000 },
+          publicCharterLong: { basePrice: 15000 },
+          privateCharter: { basePrice: 10000, shortCruisePrice: 6000 },
+          overnightCruise: { basePrice: 25000, perCabinPrice: 5000 },
+          privateCruiseBooking: { basePrice: 18000 }
+        }
+      });
+      return res.status(200).json({
+        success: true,
+        config: defaultConfig
+      });
+    }
+    
+    res.status(200).json({
+      success: true,
+      config: priceConfig
+    });
+  } catch (error) {
+    console.error("Error fetching price config:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching price configuration",
+      error: error.message
+    });
+  }
+};
+
+export const updatePriceConfig = async (req, res) => {
+  try {
+    const updates = req.body;
+    
+    let priceConfig = await PriceConfig.findOne().sort({ createdAt: -1 });
+    
+    if (!priceConfig) {
+      priceConfig = await PriceConfig.create(updates);
+    } else {
+      // Update existing config
+      Object.keys(updates).forEach(key => {
+        if (key === 'shortCruiseSlots' && Array.isArray(updates[key])) {
+          priceConfig.shortCruiseSlots = updates[key];
+        } else if (key === 'addons' && typeof updates[key] === 'object') {
+          priceConfig.addons = updates[key];
+        } else if (key === 'formSpecificPricing' && typeof updates[key] === 'object') {
+          priceConfig.formSpecificPricing = updates[key];
+        } else {
+          priceConfig[key] = updates[key];
+        }
+      });
+      await priceConfig.save();
+    }
+    
+    res.status(200).json({
+      success: true,
+      message: "Price configuration updated successfully",
+      config: priceConfig
+    });
+  } catch (error) {
+    console.error("Error updating price config:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error updating price configuration",
+      error: error.message
+    });
+  }
+};
+
+// CALENDAR CONFIGURATION FUNCTIONS
+export const getCalendarConfig = async (req, res) => {
+  try {
+    const calendarConfig = await CalendarConfig.findOne().sort({ createdAt: -1 });
+    
+    if (!calendarConfig) {
+      const defaultConfig = await CalendarConfig.create({
+        availableDates: [],
+        blockedDates: [],
+        settings: {
+          minAdvanceDays: 1,
+          maxAdvanceDays: 365,
+          allowSameDay: false
+        }
+      });
+      return res.status(200).json({
+        success: true,
+        config: defaultConfig
+      });
+    }
+    
+    res.status(200).json({
+      success: true,
+      config: calendarConfig
+    });
+  } catch (error) {
+    console.error("Error fetching calendar config:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching calendar configuration",
+      error: error.message
+    });
+  }
+};
+
+export const updateCalendarConfig = async (req, res) => {
+  try {
+    const updates = req.body;
+    
+    let calendarConfig = await CalendarConfig.findOne().sort({ createdAt: -1 });
+    
+    if (!calendarConfig) {
+      calendarConfig = await CalendarConfig.create(updates);
+    } else {
+      Object.keys(updates).forEach(key => {
+        calendarConfig[key] = updates[key];
+      });
+      await calendarConfig.save();
+    }
+    
+    res.status(200).json({
+      success: true,
+      message: "Calendar configuration updated successfully",
+      config: calendarConfig
+    });
+  } catch (error) {
+    console.error("Error updating calendar config:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error updating calendar configuration",
+      error: error.message
+    });
+  }
+};
+
+export const addAvailableDate = async (req, res) => {
+  try {
+    const { date } = req.body;
+    
+    if (!date) {
+      return res.status(400).json({
+        success: false,
+        message: "Date is required"
+      });
+    }
+    
+    let calendarConfig = await CalendarConfig.findOne().sort({ createdAt: -1 });
+    
+    if (!calendarConfig) {
+      calendarConfig = await CalendarConfig.create({
+        availableDates: [new Date(date)],
+        blockedDates: [],
+        settings: { minAdvanceDays: 1, maxAdvanceDays: 365, allowSameDay: false }
+      });
+    } else {
+      // Check if date already exists
+      const dateExists = calendarConfig.availableDates.some(d => 
+        new Date(d).toDateString() === new Date(date).toDateString()
+      );
+      
+      if (!dateExists) {
+        calendarConfig.availableDates.push(new Date(date));
+        calendarConfig.availableDates.sort((a, b) => new Date(a) - new Date(b));
+        await calendarConfig.save();
+      }
+    }
+    
+    res.status(200).json({
+      success: true,
+      message: "Available date added successfully",
+      config: calendarConfig
+    });
+  } catch (error) {
+    console.error("Error adding available date:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error adding available date",
+      error: error.message
+    });
+  }
+};
+
+export const removeAvailableDate = async (req, res) => {
+  try {
+    const { index } = req.params;
+    
+    const calendarConfig = await CalendarConfig.findOne().sort({ createdAt: -1 });
+    
+    if (!calendarConfig) {
+      return res.status(404).json({
+        success: false,
+        message: "Calendar configuration not found"
+      });
+    }
+    
+    if (index >= 0 && index < calendarConfig.availableDates.length) {
+      calendarConfig.availableDates.splice(index, 1);
+      await calendarConfig.save();
+    }
+    
+    res.status(200).json({
+      success: true,
+      message: "Available date removed successfully",
+      config: calendarConfig
+    });
+  } catch (error) {
+    console.error("Error removing available date:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error removing available date",
+      error: error.message
+    });
+  }
+};
+
+export const addBlockedDate = async (req, res) => {
+  try {
+    const { date, reason } = req.body;
+    
+    if (!date) {
+      return res.status(400).json({
+        success: false,
+        message: "Date is required"
+      });
+    }
+    
+    let calendarConfig = await CalendarConfig.findOne().sort({ createdAt: -1 });
+    
+    if (!calendarConfig) {
+      calendarConfig = await CalendarConfig.create({
+        availableDates: [],
+        blockedDates: [{ date: new Date(date), reason: reason || "Maintenance" }],
+        settings: { minAdvanceDays: 1, maxAdvanceDays: 365, allowSameDay: false }
+      });
+    } else {
+      // Check if date already blocked
+      const dateExists = calendarConfig.blockedDates.some(b => 
+        new Date(b.date).toDateString() === new Date(date).toDateString()
+      );
+      
+      if (!dateExists) {
+        calendarConfig.blockedDates.push({
+          date: new Date(date),
+          reason: reason || "Maintenance"
+        });
+        calendarConfig.blockedDates.sort((a, b) => new Date(a.date) - new Date(b.date));
+        await calendarConfig.save();
+      }
+    }
+    
+    res.status(200).json({
+      success: true,
+      message: "Blocked date added successfully",
+      config: calendarConfig
+    });
+  } catch (error) {
+    console.error("Error adding blocked date:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error adding blocked date",
+      error: error.message
+    });
+  }
+};
+
+export const removeBlockedDate = async (req, res) => {
+  try {
+    const { index } = req.params;
+    
+    const calendarConfig = await CalendarConfig.findOne().sort({ createdAt: -1 });
+    
+    if (!calendarConfig) {
+      return res.status(404).json({
+        success: false,
+        message: "Calendar configuration not found"
+      });
+    }
+    
+    if (index >= 0 && index < calendarConfig.blockedDates.length) {
+      calendarConfig.blockedDates.splice(index, 1);
+      await calendarConfig.save();
+    }
+    
+    res.status(200).json({
+      success: true,
+      message: "Blocked date removed successfully",
+      config: calendarConfig
+    });
+  } catch (error) {
+    console.error("Error removing blocked date:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error removing blocked date",
+      error: error.message
+    });
+  }
+};
 
 // Calculate dynamic price based on form type
 const calculateDynamicPrice = async (formType, formData) => {

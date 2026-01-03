@@ -1,15 +1,15 @@
 import mongoose from 'mongoose';
 
 const slotSchema = new mongoose.Schema({
-  label: String,
-  time: String,
-  price: Number,
+  label: { type: String },
+  time: { type: String },
+  price: { type: Number },
   enabled: { type: Boolean, default: true }
 });
 
 const addonSchema = new mongoose.Schema({
-  label: String,
-  price: Number,
+  label: { type: String },
+  price: { type: Number },
   enabled: { type: Boolean, default: true }
 });
 
@@ -19,47 +19,64 @@ const priceConfigSchema = new mongoose.Schema({
   includedGuests: { type: Number, default: 1 },
   extraGuestPrice: { type: Number, default: 300 },
   maxGuests: { type: Number, default: 150 },
-  
+
   // Short cruise slots pricing
   shortCruiseSlots: [slotSchema],
-  
+
   // Addons pricing
   addons: {
     type: Map,
     of: addonSchema,
     default: {}
   },
-  
-  // Form-specific pricing (for your 5 forms)
+
+  // Form-specific pricing
   formSpecificPricing: {
     tsangpoImperialPrivate: {
       basePrice: { type: Number, default: 12000 },
-      description: "Tsangpo Imperial Private Booking"
+      description: {
+        type: String,
+        default: "Tsangpo Imperial Private Booking"
+      }
     },
     publicCharterLong: {
       basePrice: { type: Number, default: 15000 },
-      description: "Public Charter Long Cruise"
+      description: {
+        type: String,
+        default: "Public Charter Long Cruise"
+      }
     },
     privateCharter: {
       basePrice: { type: Number, default: 10000 },
       shortCruisePrice: { type: Number, default: 6000 },
-      description: "Private Charter"
+      description: {
+        type: String,
+        default: "Private Charter"
+      }
     },
     overnightCruise: {
       basePrice: { type: Number, default: 25000 },
       perCabinPrice: { type: Number, default: 5000 },
-      description: "Overnight Cruise"
+      description: {
+        type: String,
+        default: "Overnight Cruise"
+      }
     },
     privateCruiseBooking: {
       basePrice: { type: Number, default: 18000 },
-      description: "Private Cruise Booking"
+      description: {
+        type: String,
+        default: "Private Cruise Booking"
+      }
     }
   },
-  
-  updatedBy: String,
+
+  updatedBy: { type: String },
   updatedAt: { type: Date, default: Date.now }
 }, {
   timestamps: true
 });
 
-export default mongoose.model('PriceConfig', priceConfigSchema);
+export default mongoose.models.PriceConfig ||
+  mongoose.model('PriceConfig', priceConfigSchema);
+

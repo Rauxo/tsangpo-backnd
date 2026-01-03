@@ -5,7 +5,16 @@ import {
   checkDate,
   getBookings,
   updateBookingStatus,
-  getBookingStats
+  getBookingStats,
+  // New functions for price and calendar config
+  getPriceConfig,
+  updatePriceConfig,
+  getCalendarConfig,
+  updateCalendarConfig,
+  addAvailableDate,
+  removeAvailableDate,
+  addBlockedDate,
+  removeBlockedDate
 } from '../controllers/mailBookingController.js';
 
 const router = express.Router();
@@ -19,5 +28,17 @@ router.get('/check-date/:date', checkDate);
 router.get('/admin/bookings', getBookings);
 router.put('/admin/bookings/:id/status', updateBookingStatus);
 router.get('/admin/stats', getBookingStats);
+
+// Price configuration routes
+router.get('/admin/prices', getPriceConfig);
+router.put('/admin/prices', updatePriceConfig);
+
+// Calendar configuration routes
+router.get('/admin/calendar', getCalendarConfig);
+router.put('/admin/calendar', updateCalendarConfig);
+router.post('/admin/calendar/available', addAvailableDate);
+router.delete('/admin/calendar/available/:index', removeAvailableDate);
+router.post('/admin/calendar/blocked', addBlockedDate);
+router.delete('/admin/calendar/blocked/:index', removeBlockedDate);
 
 export default router;
