@@ -17,7 +17,7 @@ const priceConfigSchema = new mongoose.Schema({
   basePrice: {
     type: Number,
     required: true,
-    default: 8000
+    default: 0
   },
   shortCruiseSlots: [slotSchema],
   addons: {

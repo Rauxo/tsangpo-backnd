@@ -66,7 +66,7 @@ export const createBooking = async (req, res) => {
       extraGuestsPrice = (guests - priceConfig.includedGuests) * priceConfig.extraGuestPrice;
     }
     
-    const totalAmount = basePrice + slotPrice + addonsTotal + extraGuestsPrice;
+    const totalAmount =  slotPrice + addonsTotal + extraGuestsPrice;
     
     const razorpayOrder = await razorpay.orders.create({
       amount: totalAmount * 100,
