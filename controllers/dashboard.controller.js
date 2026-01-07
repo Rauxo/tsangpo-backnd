@@ -5,70 +5,39 @@ import Story from "../models/story.model.js";
 import PriceConfig from "../models/PriceConfig.js";
 import CalendarConfig from "../models/CalendarConfig.js";
 
-// Get dashboard statistics
+// Get dashboard statistics - CORRECTED VERSION
 export const getDashboardStats = async (req, res) => {
   try {
     // Get current date for calculations
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
-    // Calculate total bookings from both booking systems
-    const totalBookingsCount = await Booking.countDocuments();
-    const mailBookingsCount = await MailBooking.countDocuments();
-    const totalBookings = totalBookingsCount + mailBookingsCount;
-    
-    // Get private cruises count (from both systems)
-    const privateBookings = await Booking.countDocuments({ 
-      bookingType: 'private' 
-    });
-    const privateMailBookings = await MailBooking.countDocuments({
-      formType: { 
-        $in: ['tsangpo-imperial-private', 'private-charter', 'private-cruise-booking'] 
-      }
-    });
-    const privateCruises = privateBookings + privateMailBookings;
-    
-    // Get group cruises count (from both systems)
-    const groupBookings = await Booking.countDocuments({ 
-      bookingType: 'group' 
-    });
-    const groupMailBookings = await MailBooking.countDocuments({
-      formType: { 
-        $in: ['public-charter-long'] 
-      }
-    });
-    const groupCruises = groupBookings + groupMailBookings;
-    
-    // Get gallery images count
-    const galleryImages = await Gallery.countDocuments();
-    
-    // Get stories count
-    const stories = await Story.countDocuments({ isPublished: true });
-    
-    // Calculate available seats
-    const priceConfig = await PriceConfig.findOne().sort({ createdAt: -1 });
-    const totalCapacity = priceConfig?.maxGuests || 160; // Default 160 if not configured
-    
-    // Get today's confirmed bookings
     const todayStart = new Date(today);
     const todayEnd = new Date(today);
     todayEnd.setHours(23, 59, 59, 999);
     
+    console.log("Today's date range for query:", todayStart, "to", todayEnd);
+    
+    // FIX 1: Use createdAt for "today's bookings"
     const todaysBookings = await Booking.countDocuments({
-      date: { $gte: todayStart, $lte: todayEnd },
+      createdAt: { $gte: todayStart, $lte: todayEnd },  // CHANGED
       bookingStatus: 'CONFIRMED'
     });
     
     const todaysMailBookings = await MailBooking.countDocuments({
-      date: { $gte: todayStart, $lte: todayEnd },
+      createdAt: { $gte: todayStart, $lte: todayEnd },  // CHANGED
       status: 'confirmed'
     });
     
-    // Calculate booked seats for today
+    console.log("Today's bookings count:", {
+      bookings: todaysBookings,
+      mailBookings: todaysMailBookings
+    });
+    
+    // FIX 2: Calculate guests for today - use createdAt
     const todaysBookingGuests = await Booking.aggregate([
       {
         $match: {
-          date: { $gte: todayStart, $lte: todayEnd },
+          createdAt: { $gte: todayStart, $lte: todayEnd },  // CHANGED
           bookingStatus: 'CONFIRMED'
         }
       },
@@ -83,7 +52,7 @@ export const getDashboardStats = async (req, res) => {
     const todaysMailBookingGuests = await MailBooking.aggregate([
       {
         $match: {
-          date: { $gte: todayStart, $lte: todayEnd },
+          createdAt: { $gte: todayStart, $lte: todayEnd },  // CHANGED
           status: 'confirmed'
         }
       },
@@ -99,86 +68,105 @@ export const getDashboardStats = async (req, res) => {
       (todaysBookingGuests[0]?.totalGuests || 0) + 
       (todaysMailBookingGuests[0]?.totalGuests || 0);
     
-    const availableSeats = totalCapacity - todaysTotalGuests;
+    // FIX 3: Get capacity
+    const priceConfig = await PriceConfig.findOne().sort({ createdAt: -1 });
+    const totalCapacity = priceConfig?.maxGuests || 160;
+    const availableSeats = Math.max(0, totalCapacity - todaysTotalGuests);
     
-    // Get recent activity
+    console.log("Capacity calculation:", {
+      totalCapacity,
+      todaysTotalGuests,
+      availableSeats
+    });
+    
+    // FIX 4: Get recent activity with correct user field
     const recentBookings = await Booking.find()
       .sort({ createdAt: -1 })
       .limit(5)
-      .populate('user', 'name email');
+      .populate('user', 'fullName email');  // CHANGED: 'name' → 'fullName'
     
     const recentMailBookings = await MailBooking.find()
       .sort({ createdAt: -1 })
       .limit(5);
     
+    // FIX 5: Map activity with correct field names
     const recentActivity = [
       ...recentBookings.map(b => ({
         type: 'booking',
         id: b._id,
-        name: b.user?.name || 'Guest',
+        name: b.user?.fullName || b.user?.email || 'Guest',  // CHANGED
+        email: b.user?.email || 'N/A',
         date: b.date,
+        guests: b.guests,
         status: b.bookingStatus,
         createdAt: b.createdAt
       })),
       ...recentMailBookings.map(mb => ({
         type: 'enquiry',
         id: mb._id,
-        name: mb.name,
+        name: mb.name || mb.email || 'Guest',  // Use email if name missing
+        email: mb.email || 'N/A',
         date: mb.date,
+        guests: mb.guests,
         status: mb.status,
         createdAt: mb.createdAt
       }))
     ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
      .slice(0, 5);
     
-    // Get monthly statistics for chart
-    const currentMonth = today.getMonth();
-    const currentYear = today.getFullYear();
+    // FIX 6: Count private/group with correct enum values
+    const privateBookings = await Booking.countDocuments({ 
+      bookingType: { $in: ['PRIVATE', 'SHORT_CRUISE', 'LONG_CRUISE'] } 
+    });
     
-    // Monthly bookings data
-    const monthlyBookings = await Booking.aggregate([
-      {
-        $match: {
-          createdAt: {
-            $gte: new Date(currentYear, currentMonth, 1),
-            $lt: new Date(currentYear, currentMonth + 1, 1)
-          }
-        }
-      },
-      {
-        $group: {
-          _id: { $dayOfMonth: "$createdAt" },
-          count: { $sum: 1 }
-        }
-      },
-      {
-        $sort: { "_id": 1 }
+    const groupBookings = await Booking.countDocuments({ 
+      bookingType: 'GROUP' 
+    });
+    
+    const privateMailBookings = await MailBooking.countDocuments({
+      formType: { 
+        $in: ['TsangpoImperialPrivateBooking', 'PrivateCharterEnquiry'] 
       }
-    ]);
+    });
+    
+    const groupMailBookings = await MailBooking.countDocuments({
+      formType: { 
+        $in: ['PublicCharterLongCruiseEnquiry'] 
+      }
+    });
     
     res.status(200).json({
       success: true,
       data: {
         stats: {
-          totalBookings,
-          privateCruises,
-          groupCruises,
-          availableSeats: Math.max(0, availableSeats),
-          galleryImages,
-          stories,
+          totalBookings: await Booking.countDocuments() + await MailBooking.countDocuments(),
+          privateCruises: privateBookings + privateMailBookings,
+          groupCruises: groupBookings + groupMailBookings,
+          availableSeats,
+          galleryImages: await Gallery.countDocuments(),
+          stories: await Story.countDocuments({ isPublished: true }),
           totalCapacity
         },
-        recentActivity,
-        monthlyData: monthlyBookings,
         todayStats: {
           bookings: todaysBookings + todaysMailBookings,
           guests: todaysTotalGuests,
-          availableSeats: Math.max(0, availableSeats)
+          availableSeats
+        },
+        recentActivity,
+        debug: {  // Add debug info
+          queryDateRange: { todayStart, todayEnd },
+          todaysBookings,
+          todaysMailBookings,
+          todaysTotalGuests
         }
       }
     });
+    
   } catch (error) {
-    console.error("Dashboard stats error:", error);
+    console.error("Dashboard error details:", {
+      message: error.message,
+      stack: error.stack
+    });
     res.status(500).json({
       success: false,
       message: "Error fetching dashboard statistics",
