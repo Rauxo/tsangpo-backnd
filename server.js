@@ -11,6 +11,7 @@ import storyRoute from "./routes/story.route.js";
 import priceConfigRoute from "./routes/priceConfig.route.js";
 import calendarRoute from "./routes/calendar.route.js";
 import bookingRoute from "./routes/booking.route.js";
+import dashboardRoute from "./routes/dashboard.route.js";
 import MailBooking from "./routes/bookingRoutes.js"
 
 connectDb();
@@ -32,6 +33,7 @@ app.use("/api/v1/prices", priceConfigRoute);
 app.use("/api/v1/calendar", calendarRoute);
 app.use("/api/v1/bookings", bookingRoute);
 app.use("/api/v1/mail/bookings", MailBooking);
+app.use("/api/v1/dashboard", dashboardRoute);
 
 
 app.get("/", (req, res) => {
