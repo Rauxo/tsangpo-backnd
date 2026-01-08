@@ -6,5 +6,7 @@ const router = express.Router();
 
 router.get("/stats", auth, adminAuth, getDashboardStats);
 router.get("/analytics", auth, adminAuth, getBookingAnalytics);
+router.get("/guest-stats", getGuestStatistics); // Add this
+router.get("/seat-occupancy", getSeatOccupancyReport); // Add this
 
 export default router;

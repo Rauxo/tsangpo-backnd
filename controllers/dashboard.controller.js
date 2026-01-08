@@ -5,7 +5,7 @@ import Story from "../models/story.model.js";
 import PriceConfig from "../models/PriceConfig.js";
 import CalendarConfig from "../models/CalendarConfig.js";
 
-// Get dashboard statistics - CORRECTED VERSION
+// Get dashboard statistics - UPDATED WITH ADULT/CHILD STATS
 export const getDashboardStats = async (req, res) => {
   try {
     // Get current date for calculations
@@ -17,104 +17,128 @@ export const getDashboardStats = async (req, res) => {
     
     console.log("Today's date range for query:", todayStart, "to", todayEnd);
     
-    // FIX 1: Use createdAt for "today's bookings"
-    const todaysBookings = await Booking.countDocuments({
-      createdAt: { $gte: todayStart, $lte: todayEnd },  // CHANGED
+    // Get today's confirmed bookings
+    const todaysBookings = await Booking.find({
+      createdAt: { $gte: todayStart, $lte: todayEnd },
       bookingStatus: 'CONFIRMED'
     });
     
-    const todaysMailBookings = await MailBooking.countDocuments({
-      createdAt: { $gte: todayStart, $lte: todayEnd },  // CHANGED
+    const todaysMailBookings = await MailBooking.find({
+      createdAt: { $gte: todayStart, $lte: todayEnd },
       status: 'confirmed'
     });
     
     console.log("Today's bookings count:", {
-      bookings: todaysBookings,
-      mailBookings: todaysMailBookings
+      bookings: todaysBookings.length,
+      mailBookings: todaysMailBookings.length
     });
     
-    // FIX 2: Calculate guests for today - use createdAt
-    const todaysBookingGuests = await Booking.aggregate([
-      {
-        $match: {
-          createdAt: { $gte: todayStart, $lte: todayEnd },  // CHANGED
-          bookingStatus: 'CONFIRMED'
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          totalGuests: { $sum: "$guests" }
-        }
-      }
-    ]);
+    // Calculate today's adult/child counts
+    let todaysAdults = 0;
+    let todaysChildren = 0;
+    let todaysTotalGuests = 0;
     
-    const todaysMailBookingGuests = await MailBooking.aggregate([
-      {
-        $match: {
-          createdAt: { $gte: todayStart, $lte: todayEnd },  // CHANGED
-          status: 'confirmed'
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          totalGuests: { $sum: "$guests" }
-        }
-      }
-    ]);
+    // For Booking model (with adult/child fields)
+    todaysBookings.forEach(booking => {
+      todaysAdults += booking.adults || 0;
+      todaysChildren += booking.children || 0;
+      todaysTotalGuests += booking.guests || 0;
+    });
     
-    const todaysTotalGuests = 
-      (todaysBookingGuests[0]?.totalGuests || 0) + 
-      (todaysMailBookingGuests[0]?.totalGuests || 0);
+    // For MailBooking model (might not have adult/child fields)
+    todaysMailBookings.forEach(booking => {
+      // MailBooking might not have adults/children fields, use guests
+      todaysTotalGuests += booking.guests || 0;
+      // If MailBooking has no adult/child fields, assume all guests are adults
+      todaysAdults += booking.guests || 0;
+    });
     
-    // FIX 3: Get capacity
+    console.log("Today's guest breakdown:", {
+      adults: todaysAdults,
+      children: todaysChildren,
+      totalGuests: todaysTotalGuests
+    });
+    
+    // Get ALL confirmed bookings for total statistics
+    const allBookings = await Booking.find({ bookingStatus: 'CONFIRMED' });
+    const allMailBookings = await MailBooking.find({ status: 'confirmed' });
+    
+    // Calculate total adult/child counts
+    let totalAdults = 0;
+    let totalChildren = 0;
+    let totalGuests = 0;
+    
+    // For Booking model
+    allBookings.forEach(booking => {
+      totalAdults += booking.adults || 0;
+      totalChildren += booking.children || 0;
+      totalGuests += booking.guests || 0;
+    });
+    
+    // For MailBooking model
+    allMailBookings.forEach(booking => {
+      totalGuests += booking.guests || 0;
+      // If no adult/child fields, assume all are adults
+      totalAdults += booking.guests || 0;
+    });
+    
+    // FIX: Get capacity from calendar settings or price config
+    const calendarConfig = await CalendarConfig.findOne().sort({ createdAt: -1 });
     const priceConfig = await PriceConfig.findOne().sort({ createdAt: -1 });
-    const totalCapacity = priceConfig?.maxGuests || 160;
+    
+    // Try to get max capacity from calendar first, then from price config
+    const totalCapacity = calendarConfig?.maxBookingsPerDay || priceConfig?.maxGuests || 160;
+    
+    // Calculate available seats based on today's bookings
     const availableSeats = Math.max(0, totalCapacity - todaysTotalGuests);
     
     console.log("Capacity calculation:", {
       totalCapacity,
       todaysTotalGuests,
-      availableSeats
+      availableSeats,
+      source: calendarConfig ? 'calendar' : priceConfig ? 'priceConfig' : 'default'
     });
     
-    // FIX 4: Get recent activity with correct user field
+    // Get recent activity with correct user field
     const recentBookings = await Booking.find()
       .sort({ createdAt: -1 })
       .limit(5)
-      .populate('user', 'fullName email');  // CHANGED: 'name' → 'fullName'
+      .populate('user', 'fullName email');
     
     const recentMailBookings = await MailBooking.find()
       .sort({ createdAt: -1 })
       .limit(5);
     
-    // FIX 5: Map activity with correct field names
+    // Map activity with correct field names and include adult/child data
     const recentActivity = [
       ...recentBookings.map(b => ({
         type: 'booking',
         id: b._id,
-        name: b.user?.fullName || b.user?.email || 'Guest',  // CHANGED
+        name: b.user?.fullName || b.user?.email || 'Guest',
         email: b.user?.email || 'N/A',
         date: b.date,
-        guests: b.guests,
+        adults: b.adults || 0,
+        children: b.children || 0,
+        guests: b.guests || 0,
         status: b.bookingStatus,
         createdAt: b.createdAt
       })),
       ...recentMailBookings.map(mb => ({
         type: 'enquiry',
         id: mb._id,
-        name: mb.name || mb.email || 'Guest',  // Use email if name missing
+        name: mb.name || mb.email || 'Guest',
         email: mb.email || 'N/A',
         date: mb.date,
-        guests: mb.guests,
+        adults: mb.guests || 0, // MailBooking might not have separate adult/child
+        children: 0,
+        guests: mb.guests || 0,
         status: mb.status,
         createdAt: mb.createdAt
       }))
     ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
      .slice(0, 5);
     
-    // FIX 6: Count private/group with correct enum values
+    // Count private/group bookings
     const privateBookings = await Booking.countDocuments({ 
       bookingType: { $in: ['PRIVATE', 'SHORT_CRUISE', 'LONG_CRUISE'] } 
     });
@@ -135,29 +159,45 @@ export const getDashboardStats = async (req, res) => {
       }
     });
     
+    // Calculate adult/child ratios
+    const adultPercentage = totalGuests > 0 ? Math.round((totalAdults / totalGuests) * 100) : 0;
+    const childPercentage = totalGuests > 0 ? Math.round((totalChildren / totalGuests) * 100) : 0;
+    
     res.status(200).json({
       success: true,
       data: {
         stats: {
-          totalBookings: await Booking.countDocuments() + await MailBooking.countDocuments(),
+          totalBookings: allBookings.length + allMailBookings.length,
+          totalAdults,
+          totalChildren,
+          totalGuests,
           privateCruises: privateBookings + privateMailBookings,
           groupCruises: groupBookings + groupMailBookings,
           availableSeats,
           galleryImages: await Gallery.countDocuments(),
           stories: await Story.countDocuments({ isPublished: true }),
-          totalCapacity
+          totalCapacity,
+          adultPercentage,
+          childPercentage
         },
         todayStats: {
-          bookings: todaysBookings + todaysMailBookings,
+          bookings: todaysBookings.length + todaysMailBookings.length,
           guests: todaysTotalGuests,
+          adults: todaysAdults,
+          children: todaysChildren,
           availableSeats
         },
         recentActivity,
-        debug: {  // Add debug info
+        debug: {
           queryDateRange: { todayStart, todayEnd },
-          todaysBookings,
-          todaysMailBookings,
-          todaysTotalGuests
+          todaysBookings: todaysBookings.length,
+          todaysMailBookings: todaysMailBookings.length,
+          todaysAdults,
+          todaysChildren,
+          todaysTotalGuests,
+          totalAdults,
+          totalChildren,
+          totalGuests
         }
       }
     });
@@ -175,7 +215,7 @@ export const getDashboardStats = async (req, res) => {
   }
 };
 
-// Get booking analytics
+// Get booking analytics - UPDATED WITH ADULT/CHILD DATA
 export const getBookingAnalytics = async (req, res) => {
   try {
     const { period = 'month' } = req.query;
@@ -196,7 +236,7 @@ export const getBookingAnalytics = async (req, res) => {
         startDate = new Date(today.getFullYear(), today.getMonth() - 1, today.getDate());
     }
     
-    // Get bookings by type
+    // Get bookings with adult/child breakdown
     const bookingsByType = await Booking.aggregate([
       {
         $match: {
@@ -207,6 +247,9 @@ export const getBookingAnalytics = async (req, res) => {
         $group: {
           _id: "$bookingType",
           count: { $sum: 1 },
+          totalAdults: { $sum: "$adults" },
+          totalChildren: { $sum: "$children" },
+          totalGuests: { $sum: "$guests" },
           totalRevenue: { $sum: "$pricingBreakdown.totalAmount" }
         }
       }
@@ -223,12 +266,13 @@ export const getBookingAnalytics = async (req, res) => {
         $group: {
           _id: "$formType",
           count: { $sum: 1 },
+          totalGuests: { $sum: "$guests" },
           totalRevenue: { $sum: "$priceCalculation.totalPrice" }
         }
       }
     ]);
     
-    // Get daily booking trend
+    // Get daily booking trend with adult/child breakdown
     const dailyTrend = await Booking.aggregate([
       {
         $match: {
@@ -239,11 +283,54 @@ export const getBookingAnalytics = async (req, res) => {
         $group: {
           _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
           count: { $sum: 1 },
+          adults: { $sum: "$adults" },
+          children: { $sum: "$children" },
+          guests: { $sum: "$guests" },
           revenue: { $sum: "$pricingBreakdown.totalAmount" }
         }
       },
       {
         $sort: { "_id": 1 }
+      }
+    ]);
+    
+    // Get adult/child distribution by cruise type
+    const distributionByCruise = await Booking.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: startDate }
+        }
+      },
+      {
+        $group: {
+          _id: "$slot.label",
+          adults: { $sum: "$adults" },
+          children: { $sum: "$children" },
+          total: { $sum: 1 }
+        }
+      }
+    ]);
+    
+    // Get top booking dates
+    const topBookingDates = await Booking.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: startDate }
+        }
+      },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+          bookings: { $sum: 1 },
+          adults: { $sum: "$adults" },
+          children: { $sum: "$children" }
+        }
+      },
+      {
+        $sort: { bookings: -1 }
+      },
+      {
+        $limit: 10
       }
     ]);
     
@@ -253,6 +340,8 @@ export const getBookingAnalytics = async (req, res) => {
         bookingsByType,
         mailBookingsByType,
         dailyTrend,
+        distributionByCruise,
+        topBookingDates,
         period
       }
     });
@@ -261,6 +350,173 @@ export const getBookingAnalytics = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Error fetching analytics",
+      error: error.message
+    });
+  }
+};
+
+// NEW: Get detailed guest statistics
+export const getGuestStatistics = async (req, res) => {
+  try {
+    // Get adult/child statistics by cruise type
+    const guestStatsByCruise = await Booking.aggregate([
+      {
+        $match: {
+          bookingStatus: 'CONFIRMED'
+        }
+      },
+      {
+        $group: {
+          _id: "$slot.label",
+          totalBookings: { $sum: 1 },
+          totalAdults: { $sum: "$adults" },
+          totalChildren: { $sum: "$children" },
+          totalGuests: { $sum: "$guests" },
+          averageAdultsPerBooking: { $avg: "$adults" },
+          averageChildrenPerBooking: { $avg: "$children" }
+        }
+      },
+      {
+        $sort: { totalGuests: -1 }
+      }
+    ]);
+    
+    // Get monthly trend of adult/child bookings
+    const monthlyTrend = await Booking.aggregate([
+      {
+        $match: {
+          bookingStatus: 'CONFIRMED',
+          createdAt: { $gte: new Date(new Date().getFullYear(), 0, 1) }
+        }
+      },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m", date: "$createdAt" } },
+          bookings: { $sum: 1 },
+          adults: { $sum: "$adults" },
+          children: { $sum: "$children" },
+          revenue: { $sum: "$pricingBreakdown.totalAmount" }
+        }
+      },
+      {
+        $sort: { "_id": 1 }
+      }
+    ]);
+    
+    // Get booking size distribution
+    const bookingSizeDistribution = await Booking.aggregate([
+      {
+        $match: {
+          bookingStatus: 'CONFIRMED'
+        }
+      },
+      {
+        $bucket: {
+          groupBy: "$guests",
+          boundaries: [1, 5, 10, 20, 50, 100, 150],
+          default: "150+",
+          output: {
+            count: { $sum: 1 },
+            totalAdults: { $sum: "$adults" },
+            totalChildren: { $sum: "$children" }
+          }
+        }
+      }
+    ]);
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        guestStatsByCruise,
+        monthlyTrend,
+        bookingSizeDistribution
+      }
+    });
+  } catch (error) {
+    console.error("Guest statistics error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching guest statistics",
+      error: error.message
+    });
+  }
+};
+
+// NEW: Get seat occupancy report
+export const getSeatOccupancyReport = async (req, res) => {
+  try {
+    const { days = 30 } = req.query;
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - parseInt(days));
+    
+    // Get daily seat occupancy
+    const dailyOccupancy = await Booking.aggregate([
+      {
+        $match: {
+          bookingStatus: 'CONFIRMED',
+          date: { $gte: startDate, $lte: endDate }
+        }
+      },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+          bookings: { $sum: 1 },
+          adults: { $sum: "$adults" },
+          children: { $sum: "$children" },
+          guests: { $sum: "$guests" }
+        }
+      },
+      {
+        $sort: { "_id": 1 }
+      }
+    ]);
+    
+    // Get capacity from calendar
+    const calendarConfig = await CalendarConfig.findOne().sort({ createdAt: -1 });
+    const priceConfig = await PriceConfig.findOne().sort({ createdAt: -1 });
+    const capacity = calendarConfig?.maxBookingsPerDay || priceConfig?.maxGuests || 160;
+    
+    // Calculate occupancy percentages
+    const occupancyWithPercentage = dailyOccupancy.map(day => ({
+      ...day,
+      occupancy: Math.round((day.guests / capacity) * 100),
+      date: day._id
+    }));
+    
+    // Calculate overall statistics
+    const overallStats = dailyOccupancy.reduce((acc, day) => {
+      acc.totalAdults += day.adults;
+      acc.totalChildren += day.children;
+      acc.totalGuests += day.guests;
+      acc.totalBookings += day.bookings;
+      return acc;
+    }, { totalAdults: 0, totalChildren: 0, totalGuests: 0, totalBookings: 0 });
+    
+    // Calculate average daily occupancy
+    const averageOccupancy = dailyOccupancy.length > 0 
+      ? Math.round((overallStats.totalGuests / (dailyOccupancy.length * capacity)) * 100)
+      : 0;
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        dailyOccupancy: occupancyWithPercentage,
+        overallStats,
+        capacity,
+        averageOccupancy,
+        period: {
+          startDate,
+          endDate,
+          days: parseInt(days)
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Seat occupancy error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching seat occupancy report",
       error: error.message
     });
   }
