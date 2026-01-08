@@ -22,9 +22,21 @@ const bookingSchema = new mongoose.Schema({
   },
   guests: {
     type: Number,
-    required: true,
     min: 1,
     max: 150
+  },
+    adults: {
+    type: Number,
+    required: true,
+    min: 1,
+    default: 1
+  },
+  
+  children: {
+    type: Number,
+    required: true,
+    default: 0,
+    min: 0
   },
   addons: [{
     name: String,
