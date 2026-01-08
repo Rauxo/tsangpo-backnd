@@ -19,19 +19,18 @@ export const getDashboardStats = async (req, res) => {
     
     // Get today's confirmed bookings
     const todaysBookings = await Booking.find({
-      date: { 
-        $gte: todayStart, 
-        $lte: todayEnd 
-      },
+      createdAt: { $gte: todayStart, $lte: todayEnd },
       bookingStatus: 'CONFIRMED'
     });
     
     const todaysMailBookings = await MailBooking.find({
-      date: { 
-        $gte: todayStart, 
-        $lte: todayEnd 
-      },
+      createdAt: { $gte: todayStart, $lte: todayEnd },
       status: 'confirmed'
+    });
+    
+    console.log("Today's bookings count:", {
+      bookings: todaysBookings.length,
+      mailBookings: todaysMailBookings.length
     });
     
     // Calculate today's adult/child counts
@@ -39,39 +38,68 @@ export const getDashboardStats = async (req, res) => {
     let todaysChildren = 0;
     let todaysTotalGuests = 0;
     
-    // For Booking model (calculate from adults + children)
+    // For Booking model (with adult/child fields)
     todaysBookings.forEach(booking => {
       todaysAdults += booking.adults || 0;
       todaysChildren += booking.children || 0;
-      todaysTotalGuests += (booking.adults || 0) + (booking.children || 0);
+      todaysTotalGuests += booking.guests || 0;
+    });
+    
+    // For MailBooking model (might not have adult/child fields)
+    todaysMailBookings.forEach(booking => {
+      // MailBooking might not have adults/children fields, use guests
+      todaysTotalGuests += booking.guests || 0;
+      // If MailBooking has no adult/child fields, assume all guests are adults
+      todaysAdults += booking.guests || 0;
+    });
+    
+    console.log("Today's guest breakdown:", {
+      adults: todaysAdults,
+      children: todaysChildren,
+      totalGuests: todaysTotalGuests
+    });
+    
+    // Get ALL confirmed bookings for total statistics
+    const allBookings = await Booking.find({ bookingStatus: 'CONFIRMED' });
+    const allMailBookings = await MailBooking.find({ status: 'confirmed' });
+    
+    // Calculate total adult/child counts
+    let totalAdults = 0;
+    let totalChildren = 0;
+    let totalGuests = 0;
+    
+    // For Booking model
+    allBookings.forEach(booking => {
+      totalAdults += booking.adults || 0;
+      totalChildren += booking.children || 0;
+      totalGuests += booking.guests || 0;
     });
     
     // For MailBooking model
-    todaysMailBookings.forEach(booking => {
-      const guests = booking.guests || 0;
-      todaysTotalGuests += guests;
-      todaysAdults += guests; // Assume all are adults for MailBooking
+    allMailBookings.forEach(booking => {
+      totalGuests += booking.guests || 0;
+      // If no adult/child fields, assume all are adults
+      totalAdults += booking.guests || 0;
     });
     
-    // Get capacity
-    const priceConfig = await PriceConfig.findOne().sort({ createdAt: -1 });
+    // FIX: Get capacity from calendar settings or price config
     const calendarConfig = await CalendarConfig.findOne().sort({ createdAt: -1 });
+    const priceConfig = await PriceConfig.findOne().sort({ createdAt: -1 });
     
-    // Get max capacity
+    // Try to get max capacity from calendar first, then from price config
     const totalCapacity = calendarConfig?.maxBookingsPerDay || priceConfig?.maxGuests || 160;
     
-    // Calculate available seats based on adult + child counts
+    // Calculate available seats based on today's bookings
     const availableSeats = Math.max(0, totalCapacity - todaysTotalGuests);
     
     console.log("Capacity calculation:", {
       totalCapacity,
-      todaysAdults,
-      todaysChildren,
       todaysTotalGuests,
-      availableSeats
+      availableSeats,
+      source: calendarConfig ? 'calendar' : priceConfig ? 'priceConfig' : 'default'
     });
     
-    // Get recent activity
+    // Get recent activity with correct user field
     const recentBookings = await Booking.find()
       .sort({ createdAt: -1 })
       .limit(5)
@@ -81,7 +109,7 @@ export const getDashboardStats = async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(5);
     
-    // Map activity
+    // Map activity with correct field names and include adult/child data
     const recentActivity = [
       ...recentBookings.map(b => ({
         type: 'booking',
@@ -91,7 +119,7 @@ export const getDashboardStats = async (req, res) => {
         date: b.date,
         adults: b.adults || 0,
         children: b.children || 0,
-        guests: (b.adults || 0) + (b.children || 0),
+        guests: b.guests || 0,
         status: b.bookingStatus,
         createdAt: b.createdAt
       })),
@@ -101,7 +129,7 @@ export const getDashboardStats = async (req, res) => {
         name: mb.name || mb.email || 'Guest',
         email: mb.email || 'N/A',
         date: mb.date,
-        adults: mb.guests || 0,
+        adults: mb.guests || 0, // MailBooking might not have separate adult/child
         children: 0,
         guests: mb.guests || 0,
         status: mb.status,
@@ -110,29 +138,28 @@ export const getDashboardStats = async (req, res) => {
     ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
      .slice(0, 5);
     
-    // Get total adult/child counts from ALL bookings
-    const allBookings = await Booking.find({ bookingStatus: 'CONFIRMED' });
-    const allMailBookings = await MailBooking.find({ status: 'confirmed' });
-    
-    let totalAdults = 0;
-    let totalChildren = 0;
-    let totalGuests = 0;
-    
-    // For Booking model
-    allBookings.forEach(booking => {
-      totalAdults += booking.adults || 0;
-      totalChildren += booking.children || 0;
-      totalGuests += (booking.adults || 0) + (booking.children || 0);
+    // Count private/group bookings
+    const privateBookings = await Booking.countDocuments({ 
+      bookingType: { $in: ['PRIVATE', 'SHORT_CRUISE', 'LONG_CRUISE'] } 
     });
     
-    // For MailBooking model
-    allMailBookings.forEach(booking => {
-      const guests = booking.guests || 0;
-      totalGuests += guests;
-      totalAdults += guests; // Assume all are adults
+    const groupBookings = await Booking.countDocuments({ 
+      bookingType: 'GROUP' 
     });
     
-    // Calculate percentages
+    const privateMailBookings = await MailBooking.countDocuments({
+      formType: { 
+        $in: ['TsangpoImperialPrivateBooking', 'PrivateCharterEnquiry'] 
+      }
+    });
+    
+    const groupMailBookings = await MailBooking.countDocuments({
+      formType: { 
+        $in: ['PublicCharterLongCruiseEnquiry'] 
+      }
+    });
+    
+    // Calculate adult/child ratios
     const adultPercentage = totalGuests > 0 ? Math.round((totalAdults / totalGuests) * 100) : 0;
     const childPercentage = totalGuests > 0 ? Math.round((totalChildren / totalGuests) * 100) : 0;
     
@@ -144,6 +171,8 @@ export const getDashboardStats = async (req, res) => {
           totalAdults,
           totalChildren,
           totalGuests,
+          privateCruises: privateBookings + privateMailBookings,
+          groupCruises: groupBookings + groupMailBookings,
           availableSeats,
           galleryImages: await Gallery.countDocuments(),
           stories: await Story.countDocuments({ isPublished: true }),
@@ -158,12 +187,26 @@ export const getDashboardStats = async (req, res) => {
           children: todaysChildren,
           availableSeats
         },
-        recentActivity
+        recentActivity,
+        debug: {
+          queryDateRange: { todayStart, todayEnd },
+          todaysBookings: todaysBookings.length,
+          todaysMailBookings: todaysMailBookings.length,
+          todaysAdults,
+          todaysChildren,
+          todaysTotalGuests,
+          totalAdults,
+          totalChildren,
+          totalGuests
+        }
       }
     });
     
   } catch (error) {
-    console.error("Dashboard error:", error);
+    console.error("Dashboard error details:", {
+      message: error.message,
+      stack: error.stack
+    });
     res.status(500).json({
       success: false,
       message: "Error fetching dashboard statistics",
