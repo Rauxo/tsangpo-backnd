@@ -6,7 +6,7 @@ import crypto from "crypto";
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET
+  key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
 export const createBooking = async (req, res) => {
@@ -15,12 +15,14 @@ export const createBooking = async (req, res) => {
       bookingType, 
       date, 
       slot, 
-      guests, 
+      adults = 1,
+      children = 0,
       addons, 
       specialRequest 
     } = req.body;
     
     const userId = req.userId;
+    const totalGuests = adults + children;
     
     const calendarSettings = await CalendarSettings.findOne().sort({ createdAt: -1 });
     const bookingDate = new Date(date);
@@ -44,8 +46,9 @@ export const createBooking = async (req, res) => {
       });
     }
     
-    const basePrice = priceConfig.basePrice;
-    const slotPrice = slot?.price || 0;
+    const adultPrice = slot?.adultPrice || slot?.price || 0;
+    const childPrice = slot?.childPrice || 0;
+    const slotPrice = (adults * adultPrice) + (children * childPrice);
     
     let addonsTotal = 0;
     const addonDetails = [];
@@ -61,12 +64,7 @@ export const createBooking = async (req, res) => {
       });
     }
     
-    let extraGuestsPrice = 0;
-    if (guests > priceConfig.includedGuests) {
-      extraGuestsPrice = (guests - priceConfig.includedGuests) * priceConfig.extraGuestPrice;
-    }
-    
-    const totalAmount =  slotPrice + addonsTotal + extraGuestsPrice;
+    const totalAmount = slotPrice + addonsTotal;
     
     const razorpayOrder = await razorpay.orders.create({
       amount: totalAmount * 100,
@@ -83,15 +81,23 @@ export const createBooking = async (req, res) => {
       user: userId,
       bookingType,
       date: bookingDate,
-      slot,
-      guests,
+      slot: {
+        ...slot,
+        adultPrice: adultPrice,
+        childPrice: childPrice
+      },
+      adults,
+      children,
+      totalGuests,
       addons: addonDetails,
       specialRequest,
       pricingBreakdown: {
-        basePrice,
+        adults,
+        children,
+        adultPrice,
+        childPrice,
         slotPrice,
         addonsTotal,
-        extraGuestsPrice,
         totalAmount
       },
       razorpayOrderId: razorpayOrder.id,
@@ -159,7 +165,9 @@ export const verifyPayment = async (req, res) => {
       });
     }
 
-    const calendarSettings = await CalendarSettings.findOne().sort({ createdAt: -1 });
+    const calendarSettings = await CalendarSettings.findOne().sort({
+      createdAt: -1,
+    });
 
     if (calendarSettings) {
       if (!Array.isArray(calendarSettings.dailyBookings)) {
@@ -204,16 +212,16 @@ export const getUserBookings = async (req, res) => {
     const bookings = await Booking.find({ user: req.userId })
       .sort({ createdAt: -1 })
       .populate("user", "name email");
-    
+
     res.status(200).json({
       success: true,
-      data: bookings
+      data: bookings,
     });
   } catch (error) {
     res.status(500).json({
       success: false,
       message: "Error fetching bookings",
-      error: error.message
+      error: error.message,
     });
   }
 };
@@ -223,16 +231,16 @@ export const getAllBookings = async (req, res) => {
     const bookings = await Booking.find()
       .sort({ createdAt: -1 })
       .populate("user", "name email phone");
-    
+
     res.status(200).json({
       success: true,
-      data: bookings
+      data: bookings,
     });
   } catch (error) {
     res.status(500).json({
       success: false,
       message: "Error fetching all bookings",
-      error: error.message
+      error: error.message,
     });
   }
 };

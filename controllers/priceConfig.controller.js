@@ -7,7 +7,8 @@ const ensureYogaSlot = (slots = []) => {
     slots.unshift({
       label: "Yoga & Meditation Cruise",
       time: "09:00 AM – 11:00 AM",
-      price: 0,
+      adultPrice: 0,
+      childPrice: 0,
       enabled: true,
     });
   }
@@ -26,25 +27,29 @@ export const getCurrentPrices = async (req, res) => {
           {
             label: "Yoga & Meditation Cruise",
             time: "09:00 AM – 11:00 AM",
-            price: 0,
+            adultPrice: 0,
+            childPrice: 0,
             enabled: true,
           },
           {
-            label: "Midway Dining Cruise",
+            label: "Lunch Cruise", // Changed from "Midday Dining Cruise"
             time: "12:30 PM – 02:30 PM",
-            price: 0,
+            adultPrice: 1599,
+            childPrice: 1099,
             enabled: true,
           },
           {
             label: "Sunset Serenity Cruise",
             time: "03:30 PM – 05:00 PM",
-            price: 2000,
+            adultPrice: 999,
+            childPrice: 599,
             enabled: true,
           },
           {
-            label: "Moonlight Cruise",
+            label: "Moonlight Cruise (Dinner Cruise)",
             time: "07:00 PM – 09:00 PM",
-            price: 4000,
+            adultPrice: 1999,
+            childPrice: 1199,
             enabled: true,
           },
         ],
@@ -100,6 +105,15 @@ export const getCurrentPrices = async (req, res) => {
     }
 
     priceConfig.addons = formattedAddons;
+    
+    // Ensure all slots have adultPrice and childPrice
+    if (priceConfig.shortCruiseSlots && Array.isArray(priceConfig.shortCruiseSlots)) {
+      priceConfig.shortCruiseSlots = priceConfig.shortCruiseSlots.map(slot => ({
+        ...slot,
+        adultPrice: slot.adultPrice || slot.price || 0,
+        childPrice: slot.childPrice || 0,
+      }));
+    }
 
     res.status(200).json({
       success: true,
@@ -134,7 +148,13 @@ export const updatePrices = async (req, res) => {
         latestConfig.maxGuests = updates.maxGuests;
 
       if (updates.shortCruiseSlots && Array.isArray(updates.shortCruiseSlots)) {
-        latestConfig.shortCruiseSlots = updates.shortCruiseSlots;
+        // Ensure all slots have proper adult/child pricing
+        const updatedSlots = updates.shortCruiseSlots.map(slot => ({
+          ...slot,
+          adultPrice: slot.adultPrice || slot.price || 0,
+          childPrice: slot.childPrice || 0,
+        }));
+        latestConfig.shortCruiseSlots = ensureYogaSlot(updatedSlots);
       }
 
       if (updates.addons) {
@@ -194,25 +214,6 @@ export const updatePrices = async (req, res) => {
 
       latestConfig.updatedBy = req.userId;
       priceConfig = await latestConfig.save();
-    }
-    const ensureYogaSlot = (slots = []) => {
-      const hasYoga = slots.some((s) => s.label === "Yoga & Meditation Cruise");
-
-      if (!hasYoga) {
-        slots.unshift({
-          label: "Yoga & Meditation Cruise",
-          time: "09:00 AM – 11:00 AM",
-          price: 0,
-          enabled: true,
-        });
-      }
-
-      return slots;
-    };
-
-    // use it
-    if (updates.shortCruiseSlots) {
-      latestConfig.shortCruiseSlots = ensureYogaSlot(updates.shortCruiseSlots);
     } else {
       const defaultAddons = {
         campsite: { label: "Campsite", price: 4000, enabled: true },
@@ -221,37 +222,17 @@ export const updatePrices = async (req, res) => {
         rooms: { label: "Guest Rooms", price: 8000, enabled: true },
       };
 
-      const defaultSlots = [
-        {
-          label: "Midway Dining Cruise",
-          time: "12:30 PM – 02:30 PM",
-          price: 0,
-          enabled: true,
-        },
-        {
-          label: "Yoga & Meditation Cruise",
-          time: "09:00 AM – 11:00 AM",
-          price: 0,
-          enabled: true,
-        },
-        {
-          label: "Sunset Serenity Cruise",
-          time: "03:30 PM – 05:00 PM",
-          price: 2000,
-          enabled: true,
-        },
-        {
-          label: "Moonlight Cruise",
-          time: "07:00 PM – 09:00 PM",
-          price: 4000,
-          enabled: true,
-        },
-      ];
+      // Ensure slots have adult/child pricing
+      const slotsWithAdultChildPricing = (updates.shortCruiseSlots || []).map(slot => ({
+        ...slot,
+        adultPrice: slot.adultPrice || slot.price || 0,
+        childPrice: slot.childPrice || 0,
+      }));
 
       const newConfig = {
         ...updates,
         addons: updates.addons || defaultAddons,
-        shortCruiseSlots: updates.shortCruiseSlots || defaultSlots,
+        shortCruiseSlots: ensureYogaSlot(slotsWithAdultChildPricing),
         updatedBy: req.userId,
       };
 

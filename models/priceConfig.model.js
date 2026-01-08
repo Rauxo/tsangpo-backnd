@@ -9,7 +9,9 @@ const addonSchema = new mongoose.Schema({
 const slotSchema = new mongoose.Schema({
   label: { type: String, required: true },
   time: { type: String, required: true },
-  price: { type: Number, required: true },
+  adultPrice: { type: Number, default: 0 },
+  childPrice: { type: Number, default: 0 },
+  price: { type: Number, default: 0 }, // For backward compatibility
   enabled: { type: Boolean, default: true }
 }, { _id: false });
 
