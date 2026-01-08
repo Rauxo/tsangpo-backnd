@@ -214,7 +214,281 @@ export const getDashboardStats = async (req, res) => {
     });
   }
 };
-
+ export const filterDate  = async (req, res) => {
+  try {
+    const { period = 'today' } = req.query;
+    
+    // Get current date for calculations
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    // Calculate date range based on period
+    let startDate, endDate;
+    
+    switch(period) {
+      case 'today':
+        startDate = new Date(today);
+        endDate = new Date(today);
+        endDate.setHours(23, 59, 59, 999);
+        break;
+      case 'week':
+        startDate = new Date(today);
+        startDate.setDate(today.getDate() - 7);
+        endDate = new Date(today);
+        endDate.setHours(23, 59, 59, 999);
+        break;
+      case 'month':
+        startDate = new Date(today.getFullYear(), today.getMonth() - 1, today.getDate());
+        endDate = new Date(today);
+        endDate.setHours(23, 59, 59, 999);
+        break;
+      case 'year':
+        startDate = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate());
+        endDate = new Date(today);
+        endDate.setHours(23, 59, 59, 999);
+        break;
+      default:
+        startDate = new Date(today);
+        endDate = new Date(today);
+        endDate.setHours(23, 59, 59, 999);
+    }
+    
+    console.log(`Fetching stats for period: ${period}`, { startDate, endDate });
+    
+    // Get bookings for the selected period
+    const periodBookings = await Booking.find({
+      date: { 
+        $gte: startDate, 
+        $lte: endDate 
+      },
+      bookingStatus: 'CONFIRMED'
+    });
+    
+    const periodMailBookings = await MailBooking.find({
+      date: { 
+        $gte: startDate, 
+        $lte: endDate 
+      },
+      status: 'confirmed'
+    });
+    
+    console.log("Period bookings count:", {
+      bookings: periodBookings.length,
+      mailBookings: periodMailBookings.length
+    });
+    
+    // Calculate period adult/child counts
+    let periodAdults = 0;
+    let periodChildren = 0;
+    let periodTotalGuests = 0;
+    
+    // For Booking model
+    periodBookings.forEach(booking => {
+      const adults = booking.adults || 0;
+      const children = booking.children || 0;
+      
+      periodAdults += adults;
+      periodChildren += children;
+      periodTotalGuests += adults + children;
+    });
+    
+    // For MailBooking model
+    periodMailBookings.forEach(booking => {
+      const guests = booking.guests || 0;
+      periodTotalGuests += guests;
+      periodAdults += guests; // Assume all are adults for MailBooking
+    });
+    
+    console.log("Period guest breakdown:", {
+      adults: periodAdults,
+      children: periodChildren,
+      totalGuests: periodTotalGuests,
+      period
+    });
+    
+    // Get ALL confirmed bookings for total statistics
+    const allBookings = await Booking.find({ bookingStatus: 'CONFIRMED' });
+    const allMailBookings = await MailBooking.find({ status: 'confirmed' });
+    
+    // Calculate total adult/child counts
+    let totalAdults = 0;
+    let totalChildren = 0;
+    let totalGuests = 0;
+    
+    // For Booking model
+    allBookings.forEach(booking => {
+      const adults = booking.adults || 0;
+      const children = booking.children || 0;
+      totalAdults += adults;
+      totalChildren += children;
+      totalGuests += adults + children;
+    });
+    
+    // For MailBooking model
+    allMailBookings.forEach(booking => {
+      const guests = booking.guests || 0;
+      totalGuests += guests;
+      totalAdults += guests; // Assume all are adults
+    });
+    
+    // Get capacity
+    const calendarConfig = await CalendarConfig.findOne().sort({ createdAt: -1 });
+    const priceConfig = await PriceConfig.findOne().sort({ createdAt: -1 });
+    
+    const totalCapacity = calendarConfig?.maxBookingsPerDay || priceConfig?.maxGuests || 160;
+    
+    // Calculate available seats (only for today)
+    let availableSeats = 0;
+    if (period === 'today') {
+      availableSeats = Math.max(0, totalCapacity - periodTotalGuests);
+    }
+    
+    // Get recent activity for the period
+    const recentBookings = await Booking.find({
+      date: { $gte: startDate, $lte: endDate }
+    })
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .populate('user', 'fullName email');
+    
+    const recentMailBookings = await MailBooking.find({
+      date: { $gte: startDate, $lte: endDate }
+    })
+      .sort({ createdAt: -1 })
+      .limit(5);
+    
+    // Map activity
+    const recentActivity = [
+      ...recentBookings.map(b => ({
+        type: 'booking',
+        id: b._id,
+        name: b.user?.fullName || b.user?.email || 'Guest',
+        email: b.user?.email || 'N/A',
+        date: b.date,
+        adults: b.adults || 0,
+        children: b.children || 0,
+        guests: (b.adults || 0) + (b.children || 0),
+        status: b.bookingStatus,
+        createdAt: b.createdAt
+      })),
+      ...recentMailBookings.map(mb => ({
+        type: 'enquiry',
+        id: mb._id,
+        name: mb.name || mb.email || 'Guest',
+        email: mb.email || 'N/A',
+        date: mb.date,
+        adults: mb.guests || 0,
+        children: 0,
+        guests: mb.guests || 0,
+        status: mb.status,
+        createdAt: mb.createdAt
+      }))
+    ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+     .slice(0, 5);
+    
+    // Count private/group bookings for the period
+    const privateBookings = periodBookings.filter(b => 
+      ['PRIVATE', 'SHORT_CRUISE', 'LONG_CRUISE'].includes(b.bookingType)
+    ).length;
+    
+    const groupBookings = periodBookings.filter(b => 
+      b.bookingType === 'GROUP'
+    ).length;
+    
+    const privateMailBookings = periodMailBookings.filter(mb => 
+      ['TsangpoImperialPrivateBooking', 'PrivateCharterEnquiry'].includes(mb.formType)
+    ).length;
+    
+    const groupMailBookings = periodMailBookings.filter(mb => 
+      mb.formType === 'PublicCharterLongCruiseEnquiry'
+    ).length;
+    
+    // Calculate adult/child ratios for the period
+    const periodAdultPercentage = periodTotalGuests > 0 ? Math.round((periodAdults / periodTotalGuests) * 100) : 0;
+    const periodChildPercentage = periodTotalGuests > 0 ? Math.round((periodChildren / periodTotalGuests) * 100) : 0;
+    
+    // Calculate overall percentages
+    const adultPercentage = totalGuests > 0 ? Math.round((totalAdults / totalGuests) * 100) : 0;
+    const childPercentage = totalGuests > 0 ? Math.round((totalChildren / totalGuests) * 100) : 0;
+    
+    // Calculate occupancy for the period (average if more than one day)
+    let averageOccupancy = 0;
+    let highOccupancyDays = 0;
+    
+    if (period !== 'today') {
+      // Get daily occupancy for the period
+      const dailyOccupancy = await Booking.aggregate([
+        {
+          $match: {
+            bookingStatus: 'CONFIRMED',
+            date: { $gte: startDate, $lte: endDate }
+          }
+        },
+        {
+          $group: {
+            _id: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+            guests: { $sum: { $add: ["$adults", "$children"] } }
+          }
+        }
+      ]);
+      
+      if (dailyOccupancy.length > 0) {
+        const totalOccupancy = dailyOccupancy.reduce((sum, day) => {
+          const dayOccupancy = Math.round((day.guests / totalCapacity) * 100);
+          if (dayOccupancy > 80) highOccupancyDays++;
+          return sum + dayOccupancy;
+        }, 0);
+        
+        averageOccupancy = Math.round(totalOccupancy / dailyOccupancy.length);
+      }
+    }
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        stats: {
+          totalBookings: allBookings.length + allMailBookings.length,
+          totalAdults,
+          totalChildren,
+          totalGuests,
+          privateCruises: privateBookings + privateMailBookings,
+          groupCruises: groupBookings + groupMailBookings,
+          availableSeats,
+          galleryImages: await Gallery.countDocuments(),
+          stories: await Story.countDocuments({ isPublished: true }),
+          totalCapacity,
+          adultPercentage,
+          childPercentage
+        },
+        periodStats: {
+          bookings: periodBookings.length + periodMailBookings.length,
+          guests: periodTotalGuests,
+          adults: periodAdults,
+          children: periodChildren,
+          availableSeats,
+          adultPercentage: periodAdultPercentage,
+          childPercentage: periodChildPercentage,
+          averageOccupancy: period === 'today' ? Math.round(((totalCapacity - availableSeats) / totalCapacity) * 100) : averageOccupancy,
+          highOccupancyDays
+        },
+        recentActivity,
+        period,
+        dateRange: {
+          startDate,
+          endDate
+        }
+      }
+    });
+    
+  } catch (error) {
+    console.error("Dashboard error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching dashboard statistics",
+      error: error.message
+    });
+  }
+};
 // Get booking analytics - UPDATED WITH ADULT/CHILD DATA
 export const getBookingAnalytics = async (req, res) => {
   try {
