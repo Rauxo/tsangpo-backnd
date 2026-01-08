@@ -22,7 +22,7 @@ export const createBooking = async (req, res) => {
     } = req.body;
     
     const userId = req.userId;
-    const totalGuests = adults + children;
+    const totalGuests = guests || (adults + children);
     
     const calendarSettings = await CalendarSettings.findOne().sort({ createdAt: -1 });
     const bookingDate = new Date(date);

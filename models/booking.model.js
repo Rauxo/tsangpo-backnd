@@ -65,6 +65,18 @@ const bookingSchema = new mongoose.Schema({
   }
 }, {
   timestamps: true
+});// Add this pre-save hook to always calculate guests from adults + children
+bookingSchema.pre('save', function(next) {
+  if (this.isModified('adults') || this.isModified('children')) {
+    this.guests = (this.adults || 0) + (this.children || 0);
+  }
+  
+  // Ensure guests is never empty
+  if (!this.guests || this.guests < 1) {
+    this.guests = (this.adults || 0) + (this.children || 0);
+  }
+  
+  next();
 });
 
 const Booking = mongoose.model("Booking", bookingSchema);
